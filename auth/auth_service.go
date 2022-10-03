@@ -155,7 +155,20 @@ func (s Service) CreateSGWUser(claims *CustomClaims) (SGWResponse, error) {
 
 	if response.StatusCode != 200 && response.StatusCode != 201 {
 		log.Println("Error creating user on Offline Reads", response.StatusCode)
-		return SGWResponse{}, errors.New("error creating user")
+		return SGWResponse{}, errors.New("error creating offline reads user")
+	}
+
+	createUserEndpointReads = s.SGWBaseURL + "/offline_writes/_user/"
+	response, err = http.Post(createUserEndpointReads, "application/json", strings.NewReader(requestBodyString))
+
+	if err != nil {
+		log.Println(err)
+		return SGWResponse{}, err
+	}
+
+	if response.StatusCode != 200 && response.StatusCode != 201 {
+		log.Println("Error creating user on Offline Writes", response.StatusCode)
+		return SGWResponse{}, errors.New("error creating offline writes user")
 	}
 
 	responseBody := SGWResponse{

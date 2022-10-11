@@ -175,7 +175,7 @@ func (s Service) CreateSGWUser(claims *CustomClaims) (SGWResponse, error) {
 		Name:           email,
 		Password:       uuid,
 		AdminRoles:     claims.Role,
-		AdminChannels:  []string{channel, claims.Email},
+		AdminChannels:  []string{channel, strings.Replace(claims.Email, "@", "_", 1)},
 		GeographicInfo: generatedOus,
 	}
 

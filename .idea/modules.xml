@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/mock-server.iml" filepath="$PROJECT_DIR$/.idea/mock-server.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/mock-msg-server.iml" filepath="$PROJECT_DIR$/.idea/mock-msg-server.iml" />
     </modules>
   </component>
 </project>

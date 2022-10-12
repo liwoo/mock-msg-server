@@ -128,8 +128,8 @@ func (s Service) CreateSGWUser(claims *CustomClaims) (SGWResponse, error) {
 	requestBody := SGWRequest{
 		Name:          email,
 		Password:      uuid,
-		AdminChannels: []string{channel, claims.Email},
-		AllChannels:   []string{channel, claims.Email, "!"},
+		AdminChannels: []string{channel, strings.Replace(claims.Email, "@", "_", 1)},
+		AllChannels:   []string{channel, strings.Replace(claims.Email, "@", "_", 1), "!"},
 		Disabled:      false,
 		AdminRoles:    []string{"replicator"},
 		Roles:         append(roles, "replicator"),

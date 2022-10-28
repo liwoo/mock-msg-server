@@ -6,6 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="a8056d41-905a-40c1-ad3a-081911bd5498" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/couchbase.go" beforeDir="false" afterPath="$PROJECT_DIR$/data/couchbase.go" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

@@ -1,6 +1,7 @@
 package data
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/bxcodec/faker/v3"
 	"github.com/couchbase/gocb/v2"
@@ -79,6 +80,12 @@ type Client struct {
 	Channels         []string `json:"channels"`
 	SyncTs           string   `json:"syncTs" faker:"date"`
 	Type             string   `json:"type" faker:"oneof: clients"`
+}
+
+type ClientUpdateDto struct {
+	AccountNumber string    `json:"accountNumber"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 func NewService(
@@ -185,6 +192,15 @@ func (s *Service) ProcessApiRequest(id string) error {
 
 		if lottery[whichLottery[0]-1] {
 			apiRequest.ResponseStatusCode = 201
+			//generate random number
+			randNum := faker.CreditCardNumber
+			clientUpdateResonse := ClientUpdateDto{
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
+				AccountNumber: randNum,
+			}
+			response, _ := json.Marshal(clientUpdateResonse)
+			apiRequest.ResponseData = string(response)
 			//create in reads database!
 		} else {
 			apiRequest.ResponseStatusCode = 500

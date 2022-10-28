@@ -193,7 +193,7 @@ func (s *Service) ProcessApiRequest(id string) error {
 		if lottery[whichLottery[0]-1] {
 			apiRequest.ResponseStatusCode = 201
 			//generate random number
-			randNum := faker.CreditCardNumber
+			randNum := faker.CCNumber()
 			clientUpdateResonse := ClientUpdateDto{
 				CreatedAt:     time.Now(),
 				UpdatedAt:     time.Now(),

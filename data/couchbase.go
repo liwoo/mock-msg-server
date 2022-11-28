@@ -110,6 +110,8 @@ func (s *Service) ensureConnection() error {
 		return nil
 	}
 
+	//gocb.SetLogger(gocb.VerboseStdioLogger())
+
 	cluster, err := gocb.Connect("couchbase://"+s.CouchbaseURL, gocb.ClusterOptions{
 		Authenticator: gocb.PasswordAuthenticator{
 			Username: s.CouchbaseUser,

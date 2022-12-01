@@ -18,7 +18,7 @@ type Service struct {
 	JWT        string
 	Secret     string
 	SGWBaseURL string
-	DistrictId int
+	DistrictId string
 	CountryId  int
 }
 
@@ -69,11 +69,13 @@ func (s Service) NewService(
 	jwt string,
 	secret string,
 	sGWBaseURL string,
+	districtId string,
 ) *Service {
 	return &Service{
 		JWT:        jwt,
 		Secret:     secret,
 		SGWBaseURL: sGWBaseURL,
+		DistrictId: districtId,
 	}
 }
 
@@ -122,14 +124,21 @@ func (s Service) CreateSGWUser(claims *CustomClaims) (SGWResponse, error) {
 		channelList = append(channelList, strconv.Itoa(channel.Id))
 	}
 
-	joinedChannels := strings.Join(channelList, "_")
-	channel := "clients_" + joinedChannels
+	entities := []string{"clients", "groups"}
+
+	var entityChannels []string
+
+	for _, entity := range entities {
+		entityChannels = append(entityChannels, entity+"_"+s.DistrictId)
+	}
+
+	emailChannel := strings.Replace(claims.Email, "@", "_", 1)
 
 	requestBody := SGWRequest{
 		Name:          email,
 		Password:      uuid,
-		AdminChannels: []string{channel, strings.Replace(claims.Email, "@", "_", 1)},
-		AllChannels:   []string{channel, strings.Replace(claims.Email, "@", "_", 1), "!"},
+		AdminChannels: append(entityChannels, emailChannel),
+		AllChannels:   append(entityChannels, emailChannel, "!"),
 		Disabled:      false,
 		AdminRoles:    []string{"replicator"},
 		Roles:         append(roles, "replicator"),
@@ -175,7 +184,7 @@ func (s Service) CreateSGWUser(claims *CustomClaims) (SGWResponse, error) {
 		Name:           email,
 		Password:       uuid,
 		AdminRoles:     claims.Role,
-		AdminChannels:  []string{channel, strings.Replace(claims.Email, "@", "_", 1)},
+		AdminChannels:  append(entityChannels, emailChannel),
 		GeographicInfo: generatedOus,
 	}
 

@@ -6,6 +6,10 @@ import (
 	"github.com/bxcodec/faker/v3"
 	"github.com/couchbase/gocb/v2"
 	"log"
+	"mock-server/cliff"
+	"mock-server/shared"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,7 +25,7 @@ type Service struct {
 	WritesBucket      *gocb.Bucket
 }
 
-type Group struct {
+type ClientGroup struct {
 	Id     int    `json:"id"`
 	Name   string `json:"name" faker:"name"`
 	Leader string `json:"leader" faker:"name"`
@@ -63,23 +67,42 @@ type ApiRequest struct {
 }
 
 type Client struct {
-	Id               string   `json:"_id"`
-	AccountNo        string   `json:"accountNo" faker:"cc_number"`
-	Active           bool     `json:"active"`
-	ActivationDate   []string `json:"activationDate" faker:"timestamp, slice_len=1"`
-	Firstname        string   `json:"firstname" faker:"first_name"`
-	Lastname         string   `json:"lastname" faker:"last_name"`
-	DisplayName      string   `json:"displayName" faker:"name"`
-	OfficeId         int      `json:"officeId"`
-	Dob              string   `json:"dob" faker:"date"`
-	Gender           string   `json:"gender" faker:"oneof: M, F"`
-	NationalIdNumber string   `json:"nationalIdNumber" faker:"cc_number"`
-	Location         Location `json:"location"`
-	Contacts         Contact  `json:"contacts"`
-	Group            Group    `json:"group"`
-	Channels         []string `json:"channels"`
-	SyncTs           string   `json:"syncTs" faker:"date"`
-	Type             string   `json:"type" faker:"oneof: clients"`
+	Id               string      `json:"_id"`
+	AccountNo        string      `json:"accountNo" faker:"cc_number"`
+	Active           bool        `json:"active"`
+	ActivationDate   []string    `json:"activationDate" faker:"timestamp, slice_len=1"`
+	Firstname        string      `json:"firstname" faker:"first_name"`
+	Lastname         string      `json:"lastname" faker:"last_name"`
+	DisplayName      string      `json:"displayName" faker:"name"`
+	OfficeId         int         `json:"officeId"`
+	Dob              string      `json:"dob" faker:"date"`
+	Gender           string      `json:"gender" faker:"oneof: M, F"`
+	NationalIdNumber string      `json:"nationalIdNumber" faker:"cc_number"`
+	Location         Location    `json:"location"`
+	Contacts         Contact     `json:"contacts"`
+	Group            ClientGroup `json:"group"`
+	Channels         []string    `json:"channels"`
+	SyncTs           string      `json:"syncTs" faker:"date"`
+	Type             string      `json:"type" faker:"oneof: clients"`
+}
+
+type GroupConfigurations struct {
+	MinClientsInGroup int `json:"minClientsInGroup"`
+	MaxClientsInGroup int `json:"maxClientsInGroup"`
+}
+
+type Group struct {
+	Id             string              `json:"id"`
+	AccountNo      string              `json:"accountNo" faker:"cc_number"`
+	Name           string              `json:"name" faker:"name"`
+	Active         bool                `json:"active"`
+	ActivationDate []string            `json:"activationDate" faker:"timestamp, slice_len=1"`
+	OfficeId       int                 `json:"officeId"`
+	OfficeName     string              `json:"officeName" faker:"name"`
+	Channels       []string            `json:"channels"`
+	Configurations GroupConfigurations `json:"configurations"`
+	SyncTs         string              `json:"syncTs" faker:"date"`
+	Type           string              `json:"type" faker:"oneof: groups"`
 }
 
 type ClientUpdateDto struct {
@@ -141,7 +164,7 @@ func (s *Service) ensureConnection() error {
 	return nil
 }
 
-func (s *Service) ProcessApiRequest(id string) error {
+func (s *Service) ProcessApiRequest(id string, cliffService *cliff.Service) error {
 	err := s.ensureConnection()
 
 	if err != nil {
@@ -188,31 +211,40 @@ func (s *Service) ProcessApiRequest(id string) error {
 
 	go func() {
 		log.Println("Started Processing Document", id)
-		time.Sleep(15 * time.Second)
-		lottery := []bool{true, true, true, true, true, false}
-		whichLottery, _ := faker.RandomInt(1, len(lottery), 1)
 
-		if lottery[whichLottery[0]-1] {
-			apiRequest.ResponseStatusCode = 201
-			//generate random number
-			randNum := faker.CCNumber()
-			clientUpdateResonse := ClientUpdateDto{
-				CreatedAt:     time.Now(),
-				UpdatedAt:     time.Now(),
-				AccountNumber: randNum,
-			}
-			response, _ := json.Marshal(clientUpdateResonse)
-			apiRequest.ResponseData = string(response)
-			//create in reads database!
-		} else {
-			apiRequest.ResponseStatusCode = 500
-		}
+		var parsedClientRequestBody shared.ParsedClientRequestBody
+		err1 := json.Unmarshal([]byte(apiRequest.RequestData), &parsedClientRequestBody)
+
+		apiRequest.ResponseStatusCode = 201
 
 		newStates := append(apiRequest.DocumentStates, DocumentState{
 			Time:   time.Now(),
 			Status: "PROCESSED",
 		})
 		apiRequest.DocumentStates = newStates
+
+		if err1 != nil {
+			log.Println(err)
+			apiRequest.ResponseStatusCode = 400
+		}
+
+		resp, err2 := cliffService.CreateClient(parsedClientRequestBody)
+
+		if err2 != nil {
+			log.Println(err)
+			apiRequest.ResponseStatusCode = 500
+		}
+
+		if err1 == nil && err2 == nil {
+			clientUpdateResonse := ClientUpdateDto{
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
+				AccountNumber: resp.AccountNo,
+			}
+			response, _ := json.Marshal(clientUpdateResonse)
+			apiRequest.ResponseData = string(response)
+		}
+		
 		_, err = wCol.Upsert(id, apiRequest, nil)
 
 		if err != nil {
@@ -223,6 +255,90 @@ func (s *Service) ProcessApiRequest(id string) error {
 	}()
 
 	return nil
+}
+
+func (s *Service) SaveInitialClients(cliffClients []shared.ClientDTO) {
+	err := s.ensureConnection()
+
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	col := s.ReadsBucket.DefaultCollection()
+	for _, client := range cliffClients {
+		cbClient := convertCliffClientToClient(client)
+
+		_, err = col.Upsert(cbClient.Id, cbClient, nil)
+		log.Println("Saved client", cbClient.Id)
+
+		if err != nil {
+			log.Println("Couldn't save client", err)
+			continue
+		}
+	}
+	return
+}
+
+func (s Service) SaveInitialGroups() {
+
+}
+
+func (s Service) UpdateClientFromWebhook(cliffClient shared.ClientDTO) error {
+	err := s.ensureConnection()
+
+	if err != nil {
+		return err
+	}
+
+	col := s.ReadsBucket.DefaultCollection()
+	cbClient := convertCliffClientToClient(cliffClient)
+
+	_, err = col.Upsert(cbClient.Id, cbClient, nil)
+	log.Println("Saved client", cbClient.Id)
+
+	if err != nil {
+		return err
+	}
+
+	log.Println("Updated client", cbClient.Id)
+
+	return nil
+}
+
+func convertCliffClientToClient(client shared.ClientDTO) Client {
+	var strActivationDate []string
+	for _, date := range client.ActivationDate {
+		strActivationDate = append(strActivationDate, strconv.Itoa(date))
+	}
+
+	//TODO: Fix this
+	//dob := time.Date(client.DateOfBirth[0], time.Month(client.DateOfBirth[1]), client.DateOfBirth[2], 0, 0, 0, 0, time.UTC)
+	//to format 1981-01-01T00:00:00.000Z
+	dobStr := "1991-04-01" //dob.Format(time.RFC3339)
+
+	contacts := Contact{
+		PrimaryPhoneNumber: client.MobileNo,
+	}
+
+	cbClient := Client{
+		Id:               "clients_" + client.AccountNo,
+		AccountNo:        client.AccountNo,
+		Active:           client.Active,
+		ActivationDate:   strActivationDate,
+		Firstname:        client.Firstname,
+		Lastname:         client.Lastname,
+		DisplayName:      client.DisplayName,
+		OfficeId:         client.OfficeId,
+		Dob:              dobStr,
+		Gender:           client.Gender.Name,
+		NationalIdNumber: client.ExternalId,
+		Contacts:         contacts,
+		Channels:         []string{"clients_" + strconv.Itoa(client.OfficeId)},
+		SyncTs:           time.Now().Format("2006-01-02 15:04:05"),
+		Type:             "clients",
+	}
+	return cbClient
 }
 
 func (s *Service) PublishDocs(channels []string) (uint, error) {
@@ -241,33 +357,65 @@ func (s *Service) PublishDocs(channels []string) (uint, error) {
 	for i := 0; i < numDocs; i++ {
 		col := s.ReadsBucket.DefaultCollection()
 		client := Client{}
+		group := Group{}
 
 		err = faker.FakeData(&client)
+		groupError := faker.FakeData(&group)
 
 		if err != nil {
+			message := fmt.Sprintf("%s on document # %s", err, string(rune(i)))
+			log.Println(message)
+			continue
+		}
+
+		if groupError != nil {
 			message := fmt.Sprintf("%s on document # %s", err, string(rune(i)))
 			log.Println(message)
 			continue
 		}
 
 		//TODO: get channel with underscore in it...
-		client.Channels = []string{channels[0]}
-		client.SyncTs = time.Now().Format("2006-01-02 15:04:05")
+		//find channel with "clients" in it
+		clientChannel, groupChannel := "", ""
+		for _, channel := range channels {
+			if strings.Contains(channel, "clients") {
+				clientChannel = channel
+			}
+			if strings.Contains(channel, "groups") {
+				groupChannel = channel
+			}
+		}
+
+		client.Channels = []string{clientChannel}
+		group.Channels = []string{groupChannel}
+		now := time.Now().Format("2006-01-02 15:04:05")
+		client.SyncTs = now
+		group.SyncTs = now
 		client.Id = "clients_" + client.AccountNo
+		group.Id = "groups_" + group.AccountNo
 		//unix timestamp
 		client.ActivationDate = []string{fmt.Sprintf("%d", time.Now().Unix())}
 
 		_, err = col.Upsert(client.Id, client, nil)
+		_, groupError = col.Upsert(group.Id, group, nil)
 
 		if err != nil {
 			message := fmt.Sprintf("%s on document # %s", err, string(rune(i)))
 			log.Println(message)
 			continue
+		} else {
+			log.Println("Successfully published Client document ID", client.Id)
+			successfulDocs += 1
 		}
 
-		log.Println("Successfully published document ID", client.Id)
-		successfulDocs += 1
-
+		if groupError != nil {
+			message := fmt.Sprintf("%s on document # %s", err, string(rune(i)))
+			log.Println(message)
+			continue
+		} else {
+			log.Println("Successfully published Group document ID", group.Id)
+			successfulDocs += 1
+		}
 	}
 	return successfulDocs, nil
 }

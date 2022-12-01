@@ -7,9 +7,11 @@ import (
 	"io/ioutil"
 	"log"
 	"mock-server/auth"
+	"mock-server/cliff"
 	"mock-server/data"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 type LoginRequestDTO struct {
@@ -40,6 +42,9 @@ type Config struct {
 	couchbaseWritesDB string
 	couchbaseUser     string
 	couchbasePass     string
+	cliffToken        string
+	cliffBaseURL      string
+	defaultOfficeId   string
 }
 
 //global envs map
@@ -57,10 +62,13 @@ func main() {
 		couchbaseWritesDB: os.Getenv("COUCHBASE_WRITES_DB"),
 		couchbaseUser:     os.Getenv("COUCHBASE_USER"),
 		couchbasePass:     os.Getenv("COUCHBASE_PASS"),
+		cliffToken:        os.Getenv("CLIFF_TOKEN"),
+		cliffBaseURL:      os.Getenv("CLIFF_BASE_URL"),
+		defaultOfficeId:   os.Getenv("DEFAULT_OFFICE_ID"),
 	}
 
 	//check if all config values are set
-	if config.secret == "" || config.sgwBaseURL == "" || config.serverPort == "" || config.couchbaseURL == "" || config.couchbaseReadsDB == "" || config.couchbaseWritesDB == "" || config.couchbaseUser == "" || config.couchbasePass == "" {
+	if config.secret == "" || config.sgwBaseURL == "" || config.districtId == "" || config.serverPort == "" || config.couchbaseURL == "" || config.couchbaseReadsDB == "" || config.couchbaseWritesDB == "" || config.couchbaseUser == "" || config.couchbasePass == "" || config.cliffToken == "" || config.cliffBaseURL == "" || config.defaultOfficeId == "" {
 		envFiles := []string{".env", "../.env"}
 		availableEnvFile := ""
 		var envs map[string]string
@@ -93,17 +101,64 @@ func main() {
 			couchbaseWritesDB: envs["CB_WRITES_DB"],
 			couchbaseUser:     envs["CB_USER"],
 			couchbasePass:     envs["CB_PASS"],
+			cliffToken:        envs["CLIFF_TOKEN"],
+			cliffBaseURL:      envs["CLIFF_BASE_URL"],
+			defaultOfficeId:   envs["DEFAULT_OFFICE_ID"],
 		}
 
 	}
 
+	//define some constants
+	const (
+		getClientsEndpoint    = "/fineract-provider/api/v1/clients"
+		getGroupsEndpoint     = "/fineract-provider/api/v1/groups"
+		createClientsEndpoint = "/fineract-provider/api/v1/clients"
+		updateClientsEndpoint = "/fineract-provider/api/v1/clients"
+	)
+
 	couchbaseService := data.NewService(config.couchbaseURL, config.couchbaseReadsDB, config.couchbaseWritesDB, config.couchbaseUser, config.couchbasePass)
+	cliffService := cliff.NewCliffService(config.cliffBaseURL, config.cliffToken, config.defaultOfficeId, getClientsEndpoint, getGroupsEndpoint, createClientsEndpoint, updateClientsEndpoint)
 
 	//http server
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		_, err := w.Write([]byte("Welcome to Mobile Sync Gateway Mock Server"))
 		if err != nil {
 			return
+		}
+	})
+
+	http.HandleFunc("/api/v3/client-updates/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			//get the body
+			body, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				log.Println(err)
+				writeError(w, err, http.StatusBadRequest)
+			}
+
+			var payload cliff.WebhookPayload
+			err = json.Unmarshal(body, &payload)
+			if err != nil {
+				log.Println(err)
+				writeError(w, err, http.StatusBadRequest)
+			}
+
+			w.Write([]byte("OK"))
+			go updateClientFromWebhook(w, payload, err, cliffService, couchbaseService)
+		}
+	})
+
+	http.HandleFunc("/api/v3/client-initializations", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			cliffClients, err := cliffService.GetOfficeClients(config.defaultOfficeId)
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			//write response string
+			response := "Saving clients to couchbase"
+			w.Write([]byte(response))
+			go couchbaseService.SaveInitialClients(cliffClients)
 		}
 	})
 
@@ -121,7 +176,7 @@ func main() {
 				writeError(w, err, http.StatusBadRequest)
 			}
 
-			err = couchbaseService.ProcessApiRequest(requestDTO.Id)
+			err = couchbaseService.ProcessApiRequest(requestDTO.Id, cliffService)
 
 			if err != nil {
 				writeError(w, err, http.StatusInternalServerError)
@@ -157,6 +212,7 @@ func main() {
 				JWT:        loginRequestDto.JWT,
 				Secret:     config.secret,
 				SGWBaseURL: config.sgwBaseURL,
+				DistrictId: config.defaultOfficeId,
 			}
 
 			claims, err := authService.RetrieveClaims()
@@ -181,16 +237,6 @@ func main() {
 				return
 			}
 
-			go func() {
-				docs, err := couchbaseService.PublishDocs(created.AdminChannels)
-
-				if err != nil {
-					log.Println(err)
-				}
-
-				log.Println("Published", docs, "documents...")
-			}()
-
 			if err != nil {
 				log.Println(err)
 			}
@@ -207,4 +253,24 @@ func main() {
 	//run the server with a message
 	log.Println("Server started on port " + config.serverPort)
 	log.Fatal(http.ListenAndServe(":"+config.serverPort, nil))
+}
+
+func updateClientFromWebhook(w http.ResponseWriter, payload cliff.WebhookPayload, err error, cliffService *cliff.Service, couchbaseService *data.Service) {
+	clientId := strconv.Itoa(payload.Response.ResourceId)
+
+	cliffClient, err := cliffService.GetClientById(clientId)
+
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	log.Println("Upserting client to couchbase", cliffClient.DisplayName)
+
+	err = couchbaseService.UpdateClientFromWebhook(cliffClient)
+
+	if err != nil {
+		log.Println(err)
+		return
+	}
 }

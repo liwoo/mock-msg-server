@@ -10,7 +10,10 @@ ENV SECRET=secret \
     COUCHBASE_READS_DB=reads \
     COUCHBASE_WRITES_DB=writes \
     COUCHBASE_USER=username \
-    COUCHBASE_PASS=password
+    COUCHBASE_PASS=password \
+    CLIFF_TOKEN=sometoken \
+    CLIFF_BASE_URL=http://localhost:8080 \
+    DEFAULT_OFFICE_ID=1
 
 # Set the Current Working Directory inside the container
 WORKDIR /app/main

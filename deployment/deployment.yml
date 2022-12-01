@@ -19,6 +19,7 @@ spec:
           image: jeremiahchienda/msg-mock:latest
           ports:
             - containerPort: 3001
+          imagePullPolicy: Always
           env:
             - name: SGW_BASE_URL
               value: "http://sync-gateway-no-wine.msgateway.svc.cluster.local:4985"
@@ -40,6 +41,15 @@ spec:
                 secretKeyRef:
                   name: my-password-secret
                   key: password
+            - name: CLIFF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cliff-token
+                  key: qa
+            - name: CLIFF_BASE_URL
+              value: "https://loans.qa.oneacrefund.org"
+            - name: DEFAULT_OFFICE_ID
+              value: "240"
 ---
 #service
 apiVersion: v1

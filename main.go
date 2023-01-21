@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 )
 
 type LoginRequestDTO struct {
@@ -30,6 +31,20 @@ func writeError(w http.ResponseWriter, err error, statusCode int) {
 		return
 	}
 	log.Println(err)
+}
+
+type APIRequestTest struct {
+	ClientEmail       string    `json:"clientEmail"`
+	CreatedAt         time.Time `json:"createdAt"`
+	Endpoint          string    `json:"endpoint"`
+	Headers           string    `json:"headers"`
+	Id                string    `json:"id"`
+	OrganizationUnits string    `json:"organizationUnits"`
+	RequestData       string    `json:"requestData"`
+	Type              string    `json:"type"`
+	Verb              string    `json:"verb"`
+	ClientMetadata    string    `json:"clientMetadata"`
+	Checksum          string    `json:"checksum"`
 }
 
 type Config struct {
@@ -127,6 +142,7 @@ func main() {
 		}
 	})
 
+	//Webhook endpoint from Fineract that gets called whenever a client Changes
 	http.HandleFunc("/api/v3/client-updates/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			//get the body
@@ -144,10 +160,13 @@ func main() {
 			}
 
 			w.Write([]byte("OK"))
-			go updateClientFromWebhook(w, payload, err, cliffService, couchbaseService)
+			go updateClientFromWebhook(payload, err, cliffService, couchbaseService)
 		}
 	})
 
+	//This is supposed to be called to inititialize ALL Clients
+	//From Fineract to Couchbase
+	//This could be done everytime a login happens which is like refreshing data on demand!
 	http.HandleFunc("/api/v3/client-initializations", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			cliffClients, err := cliffService.GetOfficeClients(config.defaultOfficeId)
@@ -162,6 +181,24 @@ func main() {
 		}
 	})
 
+	//TODO: This is supposed to be called to inititialize ALL Groups
+	//Same as above
+	//These are like refreshes in MSG
+	http.HandleFunc("/api/v3/group-initializations", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			cliffClients, err := cliffService.GetOfficeClients(config.defaultOfficeId)
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			//write response string
+			response := "Saving clients to couchbase"
+			w.Write([]byte(response))
+			go couchbaseService.SaveInitialClients(cliffClients)
+		}
+	})
+
+	//This is a webhook that gets called whenever a user writes to Couchbase (Offline Writes)
 	http.HandleFunc("/api/v3/api-requests", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			body, err := ioutil.ReadAll(r.Body)
@@ -255,7 +292,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+config.serverPort, nil))
 }
 
-func updateClientFromWebhook(w http.ResponseWriter, payload cliff.WebhookPayload, err error, cliffService *cliff.Service, couchbaseService *data.Service) {
+func updateClientFromWebhook(payload cliff.WebhookPayload, err error, cliffService *cliff.Service, couchbaseService *data.Service) {
 	clientId := strconv.Itoa(payload.Response.ResourceId)
 
 	cliffClient, err := cliffService.GetClientById(clientId)

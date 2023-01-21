@@ -1,7 +1,9 @@
 package cliff
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"log"
 	"mock-server/shared"
@@ -11,8 +13,9 @@ import (
 )
 
 type Service struct {
-	BaseURL              string
-	Token                string
+	BaseURL string
+	Token   string
+	//For Demo Purposes
 	DefaultOfficeId      string
 	GetClientsEndpoint   string
 	GetGroupsEndpoint    string
@@ -122,19 +125,38 @@ func (s Service) GetClientById(clientId string) (shared.ClientDTO, error) {
 	return clientResponse, nil
 }
 
-func (s Service) CreateClient(body shared.ParsedClientRequestBody) (shared.CreateClientResponse, error) {
-	cliffClientRequest := convertCbClientToCliffClient(body, s.DefaultOfficeId)
-	cliffClientRequestBody, err := json.Marshal(cliffClientRequest)
+func (s Service) UpsertClient(body shared.ParsedClientRequestBody, method string) (shared.CreateClientResponse, error, int) {
+	cliffClientRequestCreate := convertCbClientToCliffClient(body, s.DefaultOfficeId)
+	//cliffClientRequestUpdate := convertCbClientToCliffUpdateClient(body, s.DefaultOfficeId)
+
+	cliffClientRequestCreateBody, err := json.Marshal(cliffClientRequestCreate)
 	if err != nil {
 		log.Println(err)
-		return shared.CreateClientResponse{}, err
+		return shared.CreateClientResponse{}, err, 400
+	}
+	//cliffClientRequestUpdateBody, err := json.Marshal(cliffClientRequestUpdate)
+	if err != nil {
+		log.Println(err)
+		return shared.CreateClientResponse{}, err, 400
 	}
 
-	request, err := getCliffRequest(s.BaseURL+s.CreateClientEndpoint, "POST", string(cliffClientRequestBody))
+	//clientId := "45"
+	log.Println("Cliff Client Request Body: ", string(cliffClientRequestCreateBody))
+	url := s.BaseURL + s.CreateClientEndpoint
+	//if method == "PUT" {
+	//	url = s.BaseURL + s.UpdateClientEndpoint + "/" + clientId
+	//}
+	request, err := getCliffRequest(url, method, s.Token)
+
+	bodyBuffer := bytes.NewBuffer(cliffClientRequestCreateBody)
+	//if method == "PUT" {
+	//	bodyBuffer = bytes.NewBuffer(cliffClientRequestUpdateBody)
+	//}
+	request.Body = ioutil.NopCloser(bodyBuffer)
 
 	if err != nil {
 		log.Println(err)
-		return shared.CreateClientResponse{}, err
+		return shared.CreateClientResponse{}, err, 400
 	}
 
 	client := http.Client{}
@@ -142,7 +164,21 @@ func (s Service) CreateClient(body shared.ParsedClientRequestBody) (shared.Creat
 
 	if err != nil {
 		log.Println(err)
-		return shared.CreateClientResponse{}, err
+		return shared.CreateClientResponse{}, err, 400
+	}
+
+	//read response status code\
+	statusCode := resp.StatusCode
+
+	//handle bad status code
+	if statusCode != 200 && statusCode != 201 {
+		log.Println("Bad Status Code: ", statusCode)
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Println("Error reading response body: ", err)
+		}
+		log.Println("Response Body: ", string(body))
+		return shared.CreateClientResponse{}, errors.New(string(body)), statusCode
 	}
 
 	defer resp.Body.Close()
@@ -151,17 +187,48 @@ func (s Service) CreateClient(body shared.ParsedClientRequestBody) (shared.Creat
 
 	if err != nil {
 		log.Println(err)
-		return shared.CreateClientResponse{}, err
+		return shared.CreateClientResponse{}, err, 500
 	}
 
 	var response shared.CreateClientResponse
 	err = json.Unmarshal(respBody, &response)
 	if err != nil {
 		log.Println(err)
-		return shared.CreateClientResponse{}, err
+		return shared.CreateClientResponse{}, err, 500
 	}
 
-	return response, nil
+	return response, nil, 200
+}
+
+func convertCbClientToCliffUpdateClient(body shared.ParsedClientRequestBody, officeId string) shared.ClientUpdateBody {
+	longitude := "0.0"
+	latitude := "0.0"
+
+	address := shared.ClientAddress{
+		Street:       "N/A",
+		AddressLine1: "N/A",
+		AddressLine2: "N/A",
+		CloseTown:    "N/A",
+		VillageName:  "N/A",
+		CellName:     "N/A",
+		PostalCode:   "N/A",
+		City:         "N/A",
+		Latitude:     longitude,
+		Longitude:    latitude,
+		Locale:       body.ClientBio.Locale,
+	}
+	//todays date in format 27 January 2022
+	return shared.ClientUpdateBody{
+		ClientAddress:  address,
+		LegalFormId:    1,
+		Firstname:      body.ClientBio.Firstname,
+		Lastname:       body.ClientBio.Lastname,
+		MobileNo:       body.ClientBio.PrimaryPhoneNumber,
+		Locale:         body.ClientBio.Locale,
+		Active:         true,
+		DateFormat:     "dd MMMM yyyy",
+		ActivationDate: "05 January 2022",
+	}
 }
 
 func convertCbClientToCliffClient(body shared.ParsedClientRequestBody, officeId string) shared.CreateClientDTO {
@@ -179,19 +246,19 @@ func convertCbClientToCliffClient(body shared.ParsedClientRequestBody, officeId 
 	latitude := "0.0"
 
 	address := shared.ClientAddress{
-		Street:       body.ClientAddress.Street,
-		AddressLine1: body.ClientAddress.AddressLine1,
-		AddressLine2: body.ClientAddress.AddressLine2,
-		CloseTown:    body.ClientAddress.City,
-		VillageName:  body.ClientAddress.Street,
-		CellName:     body.ClientAddress.Street,
-		PostalCode:   strconv.Itoa(body.ClientAddress.StateProvinceId),
+		Street:       "N/A",
+		AddressLine1: "N/A",
+		AddressLine2: "N/A",
+		CloseTown:    "N/A",
+		VillageName:  "N/A",
+		CellName:     "N/A",
+		PostalCode:   "N/A",
+		City:         "N/A",
 		Latitude:     longitude,
 		Longitude:    latitude,
 		Locale:       body.ClientBio.Locale,
 	}
 	//todays date in format 27 January 2022
-	activationDate := time.Now().Format("2 January 2006")
 	return shared.CreateClientDTO{
 		ClientAddress:  address,
 		OfficeId:       officeIdInt,
@@ -203,8 +270,8 @@ func convertCbClientToCliffClient(body shared.ParsedClientRequestBody, officeId 
 		Locale:         body.ClientBio.Locale,
 		Active:         true,
 		DateFormat:     "dd MMMM yyyy",
-		DateOfBirth:    body.ClientBio.ActivationDate,
-		ActivationDate: activationDate,
+		DateOfBirth:    "01 January 1990",
+		ActivationDate: "05 January 2022",
 		Identifiers:    []shared.ClientIdentifier{identifier},
 	}
 }

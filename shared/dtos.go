@@ -5,6 +5,18 @@ type ClientsResponseDTO struct {
 	PageItems            []ClientDTO `json:"pageItems"`
 }
 
+type ClientUpdateBody struct {
+	ClientAddress  ClientAddress `json:"clientAddress"`
+	LegalFormId    int           `json:"legalFormId"`
+	Firstname      string        `json:"firstname"`
+	Lastname       string        `json:"lastname"`
+	MobileNo       string        `json:"mobileNo"`
+	Locale         string        `json:"locale"`
+	Active         bool          `json:"active"`
+	DateFormat     string        `json:"dateFormat"`
+	ActivationDate string        `json:"activationDate"`
+}
+
 type ClientAddress struct {
 	Street       string `json:"street"`
 	AddressLine1 string `json:"addressLine1"`

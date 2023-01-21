@@ -228,11 +228,12 @@ func (s *Service) ProcessApiRequest(id string, cliffService *cliff.Service) erro
 			apiRequest.ResponseStatusCode = 400
 		}
 
-		resp, err2 := cliffService.CreateClient(parsedClientRequestBody)
+		resp, err2, code := cliffService.UpsertClient(parsedClientRequestBody, apiRequest.Verb)
 
 		if err2 != nil {
 			log.Println(err)
-			apiRequest.ResponseStatusCode = 500
+			apiRequest.ResponseStatusCode = code
+			apiRequest.ResponseData = err2.Error()
 		}
 
 		if err1 == nil && err2 == nil {
@@ -244,7 +245,7 @@ func (s *Service) ProcessApiRequest(id string, cliffService *cliff.Service) erro
 			response, _ := json.Marshal(clientUpdateResonse)
 			apiRequest.ResponseData = string(response)
 		}
-		
+
 		_, err = wCol.Upsert(id, apiRequest, nil)
 
 		if err != nil {
@@ -265,23 +266,48 @@ func (s *Service) SaveInitialClients(cliffClients []shared.ClientDTO) {
 		return
 	}
 
+	var totalSynced int
+
 	col := s.ReadsBucket.DefaultCollection()
 	for _, client := range cliffClients {
 		cbClient := convertCliffClientToClient(client)
 
 		_, err = col.Upsert(cbClient.Id, cbClient, nil)
-		log.Println("Saved client", cbClient.Id)
 
 		if err != nil {
 			log.Println("Couldn't save client", err)
 			continue
 		}
+		totalSynced += 1
 	}
+	log.Println("Synced", totalSynced, "clients", "Out of", len(cliffClients))
 	return
 }
 
-func (s Service) SaveInitialGroups() {
+func (s Service) SaveInitialGroups(cliffGroups []shared.GroupDTO) {
+	err := s.ensureConnection()
 
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	var totalSynced int
+
+	col := s.ReadsBucket.DefaultCollection()
+	for _, group := range cliffGroups {
+		toGroup := convertCliffGroupToGroup(group)
+
+		_, err = col.Upsert(toGroup.Id, toGroup, nil)
+
+		if err != nil {
+			log.Println("Couldn't save group", err)
+			continue
+		}
+		totalSynced += 1
+	}
+	log.Println("Synced", totalSynced, "groups", "Out of", len(cliffGroups))
+	return
 }
 
 func (s Service) UpdateClientFromWebhook(cliffClient shared.ClientDTO) error {
@@ -304,6 +330,34 @@ func (s Service) UpdateClientFromWebhook(cliffClient shared.ClientDTO) error {
 	log.Println("Updated client", cbClient.Id)
 
 	return nil
+}
+
+func convertCliffGroupToGroup(cliffGroup shared.GroupDTO) Group {
+	cliffGropuIdStr := strconv.Itoa(cliffGroup.Id)
+
+	cliffGroupConfig := GroupConfigurations{
+		MinClientsInGroup: 0,
+		MaxClientsInGroup: cliffGroup.Configurations.MaxClientsInGroup,
+	}
+
+	var strActivationDate []string
+	for _, date := range cliffGroup.ActivationDate {
+		strActivationDate = append(strActivationDate, strconv.Itoa(date))
+	}
+
+	return Group{
+		Id:             cliffGropuIdStr,
+		Name:           cliffGroup.Name,
+		AccountNo:      cliffGroup.AccountNo,
+		Active:         cliffGroup.Active,
+		ActivationDate: strActivationDate,
+		OfficeId:       cliffGroup.OfficeId,
+		OfficeName:     cliffGroup.OfficeName,
+		Channels:       []string{"clients_" + strconv.Itoa(cliffGroup.OfficeId)},
+		Configurations: cliffGroupConfig,
+		SyncTs:         time.Now().Format("2006-01-02 15:04:05"),
+		Type:           "groups",
+	}
 }
 
 func convertCliffClientToClient(client shared.ClientDTO) Client {

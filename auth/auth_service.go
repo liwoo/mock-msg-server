@@ -107,7 +107,7 @@ func (s Service) generateOrgUnits() []OU {
 
 func (s Service) CreateSGWUser(claims *CustomClaims) (SGWResponse, error) {
 	//replace @ with _ in email
-	email := strings.Replace(claims.Email, "@", "_", -1)
+	email := "dev-test_oneacrefund.org" //strings.Replace(claims.Email, "@", "_", -1)
 	uuid := uuid2.New().String()
 	var roles []string
 
